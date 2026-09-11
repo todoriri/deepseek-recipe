@@ -22,7 +22,7 @@ deepseek-recipe 包含一套 Rust 库以及对应的 Python bindings：支持将
 
 ## 尚未支持
 
-- Token 概率（`logprobs` 和 `top_logprobs`）。
+- Token 概率（`logprobs` 和 `top_logprobs`）。请求可以携带这些字段，但库只做转发、无法提供数值；demo 可以查看后端产生的概率。
 - 文档内容、音视频输入和通过 `file_id` 获取文件。
 - 服务端工具执行，例如 `web_search`。
 - JSON Schema、正则表达式输出约束，以及工具 `strict` 设置的强制执行。
@@ -92,13 +92,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Encoding & Decoding Demo
 
-在仓库根目录运行编解码 demo：
+在仓库根目录运行 Prompt Studio demo：
 
 ```sh
 cargo run -p encoding-decoding-demo --locked
 ```
 
-打开 [http://127.0.0.1:7778](http://127.0.0.1:7778)。
+打开 [http://127.0.0.1:7778](http://127.0.0.1:7778)。该界面支持三种 API 格式的 prompt 渲染、完整模型输出的解码、使用内置 V4.1 tokenizer 统计真实 token 数，并把后端返回的 `logprobs` 转换为 token 概率视图与 JSONL 蒸馏数据。
 
 ### 更多示例
 
@@ -113,7 +113,7 @@ Rust 和 Python 均支持将模型输出转换为流式响应，见[流式响应
 | [`deepseek-recipe-encoding`](https://docs.rs/deepseek-recipe-encoding) | DeepSeek V4 与 V4.1 的 prompt 渲染与 token 编码。 |
 | [`deepseek-recipe-image`](https://docs.rs/deepseek-recipe-image) | 图片拉取与预处理。 |
 | [`deepseek-recipe-python`](deepseek-recipe-python/README.md) | Python bindings，以 `deepseek_recipe` 导入。 |
-| [encoding-decoding-demo](encoding-decoding-demo/README.md) | 编码 prompt、查看 special token，并将完整模型输出解码为 Chat Completions、Responses 或 Messages 的 Web 界面。 |
+| [encoding-decoding-demo](encoding-decoding-demo/README.md) | 编码 prompt、查看 special token、将完整模型输出解码为 Chat Completions、Responses 或 Messages，并导出用于蒸馏的 token 概率的 Web 界面。 |
 | [server-rs](server-rs/README.md) | 使用 mock 推理的 Axum API 示例。 |
 | [server-py](server-py/README.md) | 支持 mock 推理的 FastAPI 示例。 |
 

@@ -3,17 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>deepseek-recipe · Encoding &amp; Decoding Demo</title>
+<title>deepseek-recipe · Prompt Studio</title>
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header class="masthead">
   <h1><span class="brand">deepseek-recipe</span></h1>
-  <span class="badge">Encoding &amp; Decoding Demo</span>
+  <span class="badge">Prompt Studio</span>
+  <span class="spacer" aria-hidden="true"></span>
+  <button id="theme-toggle" class="ghost" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
 </header>
 
-<nav class="toolbar" aria-label="Encoding, decoding, and API format">
+<nav class="toolbar" aria-label="Mode, API format, and example">
   <div class="mode-tabs" role="tablist" aria-label="Mode">
     <button id="mode-encode" class="mode-tab active" type="button" data-mode="encode" role="tab" aria-controls="encode-panel" aria-selected="true" tabindex="0">Encode</button>
     <button id="mode-decode" class="mode-tab" type="button" data-mode="decode" role="tab" aria-controls="decode-panel" aria-selected="false" tabindex="-1">Decode</button>
@@ -24,6 +26,12 @@
     <button class="tab" type="button" data-format="responses" role="tab">Responses</button>
     <button class="tab" type="button" data-format="messages" role="tab">Messages</button>
   </div>
+  <span class="toolbar-divider" aria-hidden="true"></span>
+  <label class="example-pick">
+    <span>Example</span>
+    <select id="example-select" aria-label="Example"></select>
+  </label>
+  <button id="compare-toggle" class="ghost" type="button" title="Render each format's request draft side by side">Compare formats</button>
 </nav>
 
 <main>
@@ -33,9 +41,11 @@
       <section class="pane">
         <header class="pane-header">
           <div class="pane-heading">
-            <h2><label for="input">Original input</label></h2>
+            <h2><label for="input">Request (JSON)</label></h2>
+            <p id="example-desc" class="example-desc"></p>
           </div>
           <div id="encode-actions" class="actions">
+            <button id="reset-example" class="ghost" type="button" title="Reset to the selected example">Reset</button>
             <button id="render-prompt" class="primary" type="button" title="Encode (⌘/Ctrl + Enter)">Encode</button>
           </div>
         </header>
@@ -43,9 +53,16 @@
       </section>
       <section class="pane">
         <header class="pane-header">
-          <h2>Encoded result <span id="meta" class="meta"></span></h2>
+          <h2 id="output-title"><span id="output-label">Encoded prompt</span> <span id="meta" class="meta"></span></h2>
+          <div class="actions">
+            <button id="copy-prompt" class="ghost" type="button" title="Copy the raw prompt text">Copy prompt</button>
+          </div>
         </header>
         <pre id="output" class="prompt"></pre>
+        <div id="compare" class="compare" hidden></div>
+        <div id="token-legend" class="token-legend" hidden></div>
+        <div id="stats" class="stats" hidden></div>
+        <div id="encode-notice" class="notice" hidden></div>
       </section>
     </div>
   </section>
@@ -56,7 +73,8 @@
       <section class="pane">
         <header class="pane-header">
           <div class="pane-heading">
-            <h2><label for="model-output">Original output</label></h2>
+            <h2><label for="model-output">Model output (raw)</label></h2>
+            <p id="decode-hint" class="example-desc"></p>
           </div>
           <div id="decode-actions" class="actions" hidden>
             <button id="decode-output" class="primary" type="button" title="Decode (⌘/Ctrl + Enter)">Decode</button>
@@ -66,18 +84,78 @@
           <pre id="model-output-preview" aria-hidden="true"></pre>
           <textarea id="model-output" spellcheck="false" autocomplete="off"></textarea>
         </div>
+        <details id="prob-source" class="prob-source">
+          <summary>
+            <span class="summary-title">Token probabilities (JSON)</span>
+            <span id="logprobs-status" class="meta" role="status" aria-live="polite">none loaded</span>
+          </summary>
+          <p class="example-desc">
+            Paste a teacher model's <code>logprobs</code> from an OpenAI-compatible API,
+            vLLM, or TGI. Nothing is uploaded: probabilities are analysed in this page.
+          </p>
+          <div class="actions source-actions">
+            <button id="logprobs-sample" class="ghost" type="button" title="Load the Token probabilities example">Load sample</button>
+            <button id="logprobs-clear" class="ghost" type="button" title="Clear the payload">Clear</button>
+          </div>
+          <textarea id="logprobs-input" spellcheck="false" autocomplete="off" placeholder='{ "content": [ { "token": "Bon", "logprob": -0.02, "top_logprobs": [ … ] } ] }'></textarea>
+          <div id="logprobs-warning" class="notice" hidden></div>
+        </details>
       </section>
       <section class="pane">
         <header class="pane-header">
           <h2>Decoded result <span id="response-format" class="meta">Chat Completions</span> <span id="decode-meta" class="meta" role="status"></span></h2>
+          <div class="actions">
+            <button id="copy-json" class="ghost" type="button" title="Copy the decoded JSON">Copy JSON</button>
+          </div>
         </header>
+
+        <section id="prob-card" class="card" hidden>
+          <header class="card-header">
+            <h3>Token probabilities <span id="prob-subtitle" class="meta"></span></h3>
+            <div class="actions">
+              <label class="check" title="Print each probability next to its token">
+                <input type="checkbox" id="prob-numbers"> Numbers
+              </label>
+              <label class="field" title="Tokens below this probability count as low-confidence">
+                <span>Threshold</span>
+                <input type="number" id="prob-threshold" min="0" max="1" step="0.05" value="0.9">
+              </label>
+            </div>
+          </header>
+          <div id="prob-metrics" class="metrics"></div>
+          <div id="prob-heatmap" class="heatmap"></div>
+          <div class="heat-scale" aria-hidden="true"><span>0%</span><i></i><span>100%</span></div>
+          <div id="prob-detail" class="prob-detail" hidden></div>
+        </section>
+
         <pre id="decoded-output" class="prompt response" aria-label="Decoded result"></pre>
+        <div id="decode-legend" class="token-legend" hidden></div>
+
+        <section id="distill-card" class="card" hidden>
+          <header class="card-header">
+            <h3>Distillation export <span id="distill-subtitle" class="meta"></span></h3>
+            <div class="actions">
+              <button id="distill-copy" class="ghost" type="button" title="Copy the JSONL export">Copy JSONL</button>
+              <button id="distill-download" class="ghost" type="button" title="Download the JSONL export">Download</button>
+            </div>
+          </header>
+          <div class="export-options">
+            <label class="field"><span>Top-k</span><input type="number" id="export-topk" min="1" max="20" step="1" value="5"></label>
+            <label class="check"><input type="checkbox" id="export-reasoning" checked> Reasoning tokens</label>
+            <label class="check"><input type="checkbox" id="export-ids" checked> Token IDs</label>
+            <label class="check"><input type="checkbox" id="export-mask" checked> Mask low-confidence</label>
+            <label class="check"><input type="checkbox" id="export-prompt" checked> Rendered prompt</label>
+          </div>
+          <div id="distill-summary" class="metrics"></div>
+          <pre id="distill-preview" class="jsonl" aria-label="JSONL export preview"></pre>
+        </section>
       </section>
     </div>
   </section>
 </main>
 
 <div id="tip" class="tooltip" hidden></div>
+<script src="/distill.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

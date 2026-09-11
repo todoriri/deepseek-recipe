@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::pin::pin;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
@@ -27,15 +28,33 @@ use deepseek_recipe_encoding::v4::{
     SYSTEM_SP_TOKEN, THINKING_END_TOKEN, THINKING_START_TOKEN, USER_SP_TOKEN,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use tokenizers::Tokenizer;
 use tokio_stream::StreamExt;
 
 const DEFAULT_ADDR: &str = "127.0.0.1:7778";
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
 const APP_JS: &str = include_str!("../static/app.js");
+const DISTILL_JS: &str = include_str!("../static/distill.js");
 const STYLE_CSS: &str = include_str!("../static/style.css");
 // DeepSeek icon: https://www.deepseek.com/
 const FAVICON_PNG: &[u8] = include_bytes!("../static/favicon-32x32.png");
+
+/// The bundled V4.1 tokenizer used to turn rendered prompts and decoded output
+/// into model token IDs. It is embedded so the demo needs no external files.
+const TOKENIZER_NAME: &str = "v41";
+const TOKENIZER_JSON: &str = include_str!("../../static/tokenizers/v41/tokenizer.json");
+/// Upper bound on tokenizer input, measured in bytes.
+const MAX_TOKENIZE_BYTES: usize = 1_000_000;
+
+static TOKENIZER: OnceLock<Result<Tokenizer, String>> = OnceLock::new();
+
+fn tokenizer() -> Result<&'static Tokenizer, DemoError> {
+    TOKENIZER
+        .get_or_init(|| Tokenizer::from_bytes(TOKENIZER_JSON).map_err(|error| error.to_string()))
+        .as_ref()
+        .map_err(|error| conversion_failed(ConversionError::internal(error.clone())))
+}
 
 struct Highlight {
     name: &'static str,
@@ -251,6 +270,47 @@ struct DecodeResponse {
     segments: Vec<Segment>,
 }
 
+#[derive(Debug, Deserialize)]
+struct TokenizeRequest {
+    text: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenizeToken {
+    /// Token ID in the bundled V4.1 vocabulary.
+    id: u32,
+    /// Raw vocabulary entry. Spaces are encoded as `Ġ` in byte-level BPE.
+    token: String,
+    /// Whether the entry belongs to the added (special token) vocabulary.
+    special: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenizeResponse {
+    tokenizer: &'static str,
+    count: usize,
+    vocab_size: usize,
+    tokens: Vec<TokenizeToken>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenIdsRequest {
+    tokens: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TokenIdsResponse {
+    tokenizer: &'static str,
+    /// One ID per requested token, or `null` when the text is not a single
+    /// token in the vocabulary.
+    ids: Vec<Option<u32>>,
+}
+
+/// Upper bound on a vocabulary lookup request, measured in tokens.
+const MAX_LOOKUP_TOKENS: usize = 4096;
+/// Upper bound on one lookup entry, measured in bytes.
+const MAX_LOOKUP_BYTES: usize = 256;
+
 type DemoError = (StatusCode, Json<ErrorResponse>);
 
 fn bad_request(detail: String) -> DemoError {
@@ -370,6 +430,116 @@ async fn decode_handler(
     Ok(Json(DecodeResponse { response, segments }))
 }
 
+/// Encode text into model token IDs with the bundled V4.1 tokenizer.
+///
+/// The studio uses this to report real prompt token counts and to attach token
+/// IDs to exported distillation records. The tokenizer is loaded on first use
+/// and shared by later requests.
+async fn tokenize_handler(
+    Json(request): Json<TokenizeRequest>,
+) -> Result<Json<TokenizeResponse>, DemoError> {
+    if request.text.len() > MAX_TOKENIZE_BYTES {
+        return Err(bad_request(format!(
+            "text is {} bytes; the tokenizer accepts at most {MAX_TOKENIZE_BYTES}",
+            request.text.len()
+        )));
+    }
+    let tokenizer = tokenizer()?;
+    // The prompt already contains special token text, so no tokens are added.
+    let encoding = tokenizer
+        .encode(request.text.as_str(), false)
+        .map_err(|error| conversion_failed(ConversionError::internal(error.to_string())))?;
+    let added = tokenizer.get_added_vocabulary().get_vocab();
+    let tokens = encoding
+        .get_ids()
+        .iter()
+        .zip(encoding.get_tokens())
+        .map(|(id, token)| TokenizeToken {
+            id: *id,
+            token: token.clone(),
+            special: added.contains_key(token.as_str()),
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(TokenizeResponse {
+        tokenizer: TOKENIZER_NAME,
+        vocab_size: tokenizer.get_vocab_size(true),
+        count: tokens.len(),
+        tokens,
+    }))
+}
+
+/// Resolve decoded token text back to vocabulary IDs.
+///
+/// Top-k alternatives arrive as decoded text, which is not directly a
+/// vocabulary key: byte-level BPE writes a leading space as `Ġ`. The lookup
+/// therefore tries the raw spelling, the byte-level spelling, and finally a
+/// one-token encode, and reports `null` for anything that stays ambiguous.
+async fn token_ids_handler(
+    Json(request): Json<TokenIdsRequest>,
+) -> Result<Json<TokenIdsResponse>, DemoError> {
+    if request.tokens.len() > MAX_LOOKUP_TOKENS {
+        return Err(bad_request(format!(
+            "{} tokens requested; the lookup accepts at most {MAX_LOOKUP_TOKENS}",
+            request.tokens.len()
+        )));
+    }
+    let tokenizer = tokenizer()?;
+    let mut ids = Vec::with_capacity(request.tokens.len());
+    for text in &request.tokens {
+        ids.push(resolve_token_id(tokenizer, text)?);
+    }
+    Ok(Json(TokenIdsResponse {
+        tokenizer: TOKENIZER_NAME,
+        ids,
+    }))
+}
+
+fn resolve_token_id(tokenizer: &Tokenizer, text: &str) -> Result<Option<u32>, DemoError> {
+    if text.is_empty() || text.len() > MAX_LOOKUP_BYTES {
+        return Ok(None);
+    }
+    if let Some(id) = tokenizer.token_to_id(text) {
+        return Ok(Some(id));
+    }
+    if let Some(id) = tokenizer.token_to_id(&byte_level_key(text)) {
+        return Ok(Some(id));
+    }
+    let encoding = tokenizer
+        .encode(text, false)
+        .map_err(|error| conversion_failed(ConversionError::internal(error.to_string())))?;
+    let encoded = encoding.get_ids();
+    Ok((encoded.len() == 1).then(|| encoded[0]))
+}
+
+/// Byte-to-unicode alphabet of byte-level BPE, so a decoded token can be
+/// looked up as a vocabulary entry.
+fn bytes_to_unicode() -> &'static [char; 256] {
+    static TABLE: OnceLock<[char; 256]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = ['\0'; 256];
+        let mut assigned = [false; 256];
+        for range in [0x21..=0x7eu32, 0xa1..=0xacu32, 0xae..=0xffu32] {
+            for code in range {
+                table[code as usize] = char::from_u32(code).expect("printable ASCII or Latin-1");
+                assigned[code as usize] = true;
+            }
+        }
+        let mut next = 256u32;
+        for (byte, taken) in assigned.iter().enumerate() {
+            if !taken {
+                table[byte] = char::from_u32(next).expect("valid byte-level character");
+                next += 1;
+            }
+        }
+        table
+    })
+}
+
+fn byte_level_key(text: &str) -> String {
+    let table = bytes_to_unicode();
+    text.bytes().map(|byte| table[byte as usize]).collect()
+}
+
 fn asset(content_type: &'static str, body: &'static str) -> impl IntoResponse {
     binary_asset(content_type, body.as_bytes())
 }
@@ -401,6 +571,10 @@ async fn main() {
             get(|| async { asset("text/javascript; charset=utf-8", APP_JS) }),
         )
         .route(
+            "/distill.js",
+            get(|| async { asset("text/javascript; charset=utf-8", DISTILL_JS) }),
+        )
+        .route(
             "/style.css",
             get(|| async { asset("text/css; charset=utf-8", STYLE_CSS) }),
         )
@@ -409,7 +583,9 @@ async fn main() {
             get(|| async { binary_asset("image/png", FAVICON_PNG) }),
         )
         .route("/api/render", post(render_handler))
-        .route("/api/decode", post(decode_handler));
+        .route("/api/decode", post(decode_handler))
+        .route("/api/tokenize", post(tokenize_handler))
+        .route("/api/token-ids", post(token_ids_handler));
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     println!("deepseek-recipe demo page: http://{addr}");

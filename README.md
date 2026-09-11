@@ -32,7 +32,9 @@ inference, tool execution, and HTTP transport must be provided externally.
 
 ## Not yet supported
 
-- Token probabilities (`logprobs` and `top_logprobs`).
+- Token probabilities (`logprobs` and `top_logprobs`). Requests may set them, but
+  the library forwards the fields and cannot supply the values; the demo can
+  inspect probabilities that a backend produced.
 - Document content, audio/video input, and file retrieval by `file_id`.
 - Server tool execution, such as `web_search`.
 - JSON Schema and regex output constraints, or enforcement of tool `strict` settings.
@@ -102,13 +104,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Encoding & Decoding Demo
 
-Run the encoding and decoding demo from the repository root:
+Run the Prompt Studio demo from the repository root:
 
 ```sh
 cargo run -p encoding-decoding-demo --locked
 ```
 
-Open [http://127.0.0.1:7778](http://127.0.0.1:7778).
+Open [http://127.0.0.1:7778](http://127.0.0.1:7778). The studio renders prompts in
+all three API formats, decodes complete model output, reports real token counts
+with the bundled V4.1 tokenizer, and turns backend-supplied `logprobs` into
+token-probability views and JSONL distillation records.
 
 ### More examples
 
@@ -126,7 +131,7 @@ token IDs or decode backend token IDs, see
 | [`deepseek-recipe-encoding`](https://docs.rs/deepseek-recipe-encoding) | DeepSeek V4 and V4.1 prompt rendering and token encoding. |
 | [`deepseek-recipe-image`](https://docs.rs/deepseek-recipe-image) | Image fetching and preprocessing. |
 | [`deepseek-recipe-python`](deepseek-recipe-python/README.md) | Python bindings, imported as `deepseek_recipe`. |
-| [encoding-decoding-demo](encoding-decoding-demo/README.md) | A web interface for encoding prompts, inspecting special tokens, and decoding complete model output into Chat Completions, Responses, or Messages. |
+| [encoding-decoding-demo](encoding-decoding-demo/README.md) | A web interface for encoding prompts, inspecting special tokens, decoding complete model output into Chat Completions, Responses, or Messages, and exporting token probabilities for distillation. |
 | [server-rs](server-rs/README.md) | An Axum API example with mock inference. |
 | [server-py](server-py/README.md) | A FastAPI example with mock inference. |
 
