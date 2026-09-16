@@ -1,18 +1,32 @@
 //! Python bindings for image fetching, preprocessing, and token accounting.
+//!
+//! The reqwest fetcher and OpenCV preprocessor bindings are gated behind the
+//! `image` feature (on by default). Building `--no-default-features` drops
+//! `ReqwestImageFetcher`, `OpenCvImagePreprocessor`, and `ImageResolver` — and
+//! the reqwest/OpenCV native dependencies with them — while keeping prompt
+//! rendering and token accounting available.
 
+#[cfg(feature = "image")]
 use std::future::Future;
+#[cfg(feature = "image")]
 use std::sync::Arc;
 
 use deepseek_recipe_core::multimodal::{ImageInfo, MultiModalData};
+use deepseek_recipe_image::{ImageQuota, PreprocessOptions};
+#[cfg(feature = "image")]
 use deepseek_recipe_image::{
-    ImageByteBudget, ImageError as RustImageError, ImageFetcher, ImagePreprocessor, ImageQuota,
-    ImageResolver, OpenCvImagePreprocessor, PreprocessOptions, ReqwestImageFetcher,
+    ImageByteBudget, ImageError as RustImageError, ImageFetcher, ImagePreprocessor, ImageResolver,
+    OpenCvImagePreprocessor, ReqwestImageFetcher,
 };
-use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
+#[cfg(feature = "image")]
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
-use crate::conversation::{PyImageSource, image_detail_str, parse_image_detail};
+use crate::conversation::{image_detail_str, parse_image_detail};
+#[cfg(feature = "image")]
+use crate::conversation::PyImageSource;
 
 pyo3::create_exception!(
     _native,
@@ -29,6 +43,7 @@ pyo3::create_exception!(
 );
 
 /// Preserve the Rust error variant and retry classification in Python.
+#[cfg(feature = "image")]
 fn image_error(py: Python<'_>, error: RustImageError) -> PyErr {
     let kind = match &error {
         RustImageError::Unsupported(_) => "Unsupported",
@@ -62,6 +77,7 @@ fn image_error(py: Python<'_>, error: RustImageError) -> PyErr {
 }
 
 /// Run an asynchronous Rust image operation with the GIL released.
+#[cfg(feature = "image")]
 fn run_image_operation<T: Send>(
     py: Python<'_>,
     future: impl Future<Output = Result<T, RustImageError>> + Send,
@@ -233,6 +249,7 @@ impl PyPreprocessOptions {
 }
 
 /// Fetches external image URLs through the Rust HTTP client.
+#[cfg(feature = "image")]
 #[derive(Clone)]
 #[pyclass(
     name = "ReqwestImageFetcher",
@@ -243,6 +260,7 @@ pub(crate) struct PyReqwestImageFetcher {
     inner: Arc<ReqwestImageFetcher>,
 }
 
+#[cfg(feature = "image")]
 impl ImageFetcher for PyReqwestImageFetcher {
     fn fetch(
         &self,
@@ -253,6 +271,7 @@ impl ImageFetcher for PyReqwestImageFetcher {
     }
 }
 
+#[cfg(feature = "image")]
 #[pymethods]
 impl PyReqwestImageFetcher {
     /// Construct the Rust fetcher with its default image size limit.
@@ -287,6 +306,7 @@ impl PyReqwestImageFetcher {
 }
 
 /// Preprocesses encoded images through the Rust OpenCV implementation.
+#[cfg(feature = "image")]
 #[pyclass(
     name = "OpenCvImagePreprocessor",
     module = "deepseek_recipe._native",
@@ -296,6 +316,7 @@ pub(crate) struct PyOpenCvImagePreprocessor {
     inner: OpenCvImagePreprocessor,
 }
 
+#[cfg(feature = "image")]
 #[pymethods]
 impl PyOpenCvImagePreprocessor {
     #[new]
@@ -318,11 +339,13 @@ impl PyOpenCvImagePreprocessor {
 }
 
 /// Resolves image sources using explicit fetching and preprocessing components.
+#[cfg(feature = "image")]
 #[pyclass(name = "ImageResolver", module = "deepseek_recipe._native", frozen)]
 pub(crate) struct PyImageResolver {
     inner: ImageResolver<PyReqwestImageFetcher, OpenCvImagePreprocessor>,
 }
 
+#[cfg(feature = "image")]
 #[pymethods]
 impl PyImageResolver {
     #[new]

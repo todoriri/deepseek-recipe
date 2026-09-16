@@ -17,9 +17,10 @@ use crate::conversation::{
 use crate::encoding::{PyDeepseekV4Encoding, PyDeepseekV41Encoding};
 use crate::error::ConversionError;
 use crate::image::{
-    CalcResizeError, ImageError, PyImageInfo, PyImageQuota, PyImageResolver, PyMultiModalData,
-    PyOpenCvImagePreprocessor, PyPreprocessOptions, PyReqwestImageFetcher,
+    CalcResizeError, ImageError, PyImageInfo, PyImageQuota, PyMultiModalData, PyPreprocessOptions,
 };
+#[cfg(feature = "image")]
+use crate::image::{PyImageResolver, PyOpenCvImagePreprocessor, PyReqwestImageFetcher};
 use crate::inference::{PyInferenceChunk, PyInferenceFinishReason, PyPromptUsage};
 use crate::parsing::{PyParsingOptions, PyReasoningStage};
 use crate::request::{
@@ -77,8 +78,11 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMultiModalData>()?;
     m.add_class::<PyImageQuota>()?;
     m.add_class::<PyPreprocessOptions>()?;
+    #[cfg(feature = "image")]
     m.add_class::<PyReqwestImageFetcher>()?;
+    #[cfg(feature = "image")]
     m.add_class::<PyOpenCvImagePreprocessor>()?;
+    #[cfg(feature = "image")]
     m.add_class::<PyImageResolver>()?;
     m.add_class::<PyInferenceChunk>()?;
     m.add_class::<PyPromptUsage>()?;

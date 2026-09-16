@@ -11,14 +11,24 @@ crate-type = ["cdylib"]
 name = "_native"
 doc = false
 
+[features]
+# Prompt rendering and token accounting build without native image
+# dependencies. The `image` feature (on by default) adds the reqwest fetcher and
+# the OpenCV preprocessor, which require reqwest and OpenCV/libclang. Build with
+# `--no-default-features` for a render-only extension on hosts without OpenCV.
+default = ["image"]
+image = [
+    "deepseek-recipe-image/opencv-preprocess",
+    "deepseek-recipe-image/reqwest-fetch",
+]
+
 [dependencies]
 deepseek-recipe = { workspace = true }
 deepseek-recipe-core = { workspace = true }
 deepseek-recipe-encoding = { workspace = true }
-deepseek-recipe-image = { workspace = true, features = [
-    "opencv-preprocess",
-    "reqwest-fetch",
-] }
+# Specified directly (not `workspace = true`) so this crate can drop the
+# workspace default features (OpenCV/reqwest) and re-add them via `image` above.
+deepseek-recipe-image = { version = "0.1.0", path = "../deepseek-recipe-image", default-features = false }
 futures = { workspace = true }
 pyo3 = { version = "0.27", features = ["abi3-py310"] }
 serde = { workspace = true }

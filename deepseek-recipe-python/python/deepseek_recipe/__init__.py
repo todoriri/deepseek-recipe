@@ -29,7 +29,6 @@ from ._native import (
     ImageError,
     ImageInfo,
     ImageQuota,
-    ImageResolver,
     ImageSource,
     InferenceChunk,
     InferenceFinishReason,
@@ -41,13 +40,11 @@ from ._native import (
     MessagesResponse,
     MessagesStreamEvent,
     MultiModalData,
-    OpenCvImagePreprocessor,
     ParsingOptions,
     PreprocessOptions,
     PromptUsage,
     ReasoningStage,
     RenderedPrompt,
-    ReqwestImageFetcher,
     ResponsesChunkGenerator,
     ResponsesRequest,
     ResponsesResponse,
@@ -93,7 +90,6 @@ __all__ = [
     "ImageError",
     "ImageInfo",
     "ImageQuota",
-    "ImageResolver",
     "ImageSource",
     "InferenceChunk",
     "InferenceFinishReason",
@@ -105,13 +101,11 @@ __all__ = [
     "MessagesResponse",
     "MessagesStreamEvent",
     "MultiModalData",
-    "OpenCvImagePreprocessor",
     "ParsingOptions",
     "PreprocessOptions",
     "PromptUsage",
     "ReasoningStage",
     "RenderedPrompt",
-    "ReqwestImageFetcher",
     "ResponsesChunkGenerator",
     "ResponsesRequest",
     "ResponsesResponse",
@@ -127,3 +121,22 @@ __all__ = [
     "WebSearchBehavior",
     "__version__",
 ]
+
+# Image fetching (reqwest) and OpenCV preprocessing are only present when the
+# extension is built with the `image` feature (on by default). A render-only
+# build (`--no-default-features`, for hosts without OpenCV/libclang) omits them,
+# so import them best-effort — the package still loads for prompt rendering,
+# token encoding, and response accumulation. `HAS_IMAGE_BINDINGS` reports which.
+try:
+    from ._native import (  # noqa: F401
+        ImageResolver,
+        OpenCvImagePreprocessor,
+        ReqwestImageFetcher,
+    )
+except ImportError:
+    HAS_IMAGE_BINDINGS = False
+else:
+    HAS_IMAGE_BINDINGS = True
+    __all__ += ["ImageResolver", "OpenCvImagePreprocessor", "ReqwestImageFetcher"]
+
+__all__ += ["HAS_IMAGE_BINDINGS"]

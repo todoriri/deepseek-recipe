@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from deepseek_recipe import (
+    HAS_IMAGE_BINDINGS,
     IMAGE_SPECIAL_TOKEN,
     THINKING_END_TOKEN,
     ChatCompletionRequest,
@@ -15,13 +16,10 @@ from deepseek_recipe import (
     ConversionOptions,
     DeepseekV41Encoding,
     ImageQuota,
-    ImageResolver,
     InferenceChunk,
     InferenceFinishReason,
     MessagesRequest,
-    OpenCvImagePreprocessor,
     PromptUsage,
-    ReqwestImageFetcher,
     ResponsesRequest,
     StreamProcessor,
     Tokenizer,
@@ -244,8 +242,18 @@ def test_foreign_tokenizer_errors():
         StreamProcessor(generator, converted.parsing_options, object())
 
 
+@pytest.mark.skipif(
+    not HAS_IMAGE_BINDINGS,
+    reason="render-only build (--no-default-features): no OpenCV/reqwest image bindings",
+)
 def test_image_resolution():
     # One 50-by-40 RGB PNG exercises the native image decoder and WebP encoder.
+    from deepseek_recipe import (
+        ImageResolver,
+        OpenCvImagePreprocessor,
+        ReqwestImageFetcher,
+    )
+
     png = (
         "iVBORw0KGgoAAAANSUhEUgAAADIAAAAoCAIAAAAzED4bAAAAPElEQVR4nO3OUQkAIBBA"
         "sQvht/2jGMsYPmSwAJu1T9A8H2hpaWlpaTVoaWkVaGlpFWhpaRVoaWkVaH3QuqTYo"
